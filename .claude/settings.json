@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm -v)",
+      "Bash(npm config *)",
+      "Bash(curl -s --connect-timeout 5 https://registry.npmjs.org/)",
+      "Bash(curl -s --connect-timeout 5 https://registry.npmmirror.com/)",
+      "Bash(curl -s --connect-timeout 10 https://registry.npmjs.org/react)"
+    ]
+  }
+}

@@ -1,0 +1,438 @@
+---
+title: John Michael Isiderio — 工程能力評估
+description: 綜合 USM 項目同 trader-station 項目作出評估
+icon: Languages
+---
+
+## 一、對 TypeScript 類型系統理解不足
+
+**現象：** 7 個核心檔案使用 `: any` 聲明類型（包括 `zod-validation-utils.ts`
+呢類底層工具庫），37+ 個檔案使用 `as any` / `as unknown as` 繞過類型檢查。
+
+呢個情況反映出幾個層次嘅問題：
+
+1. **佢唔理解自己寫緊嘅函式簽名**。喺核心校驗工具入面用 `: any`，
+   代表佢寫函式時，其實唔清楚輸入同輸出應該係乜類型
+2. **遇到類型報錯時，佢傾向繞過，而唔係根治問題**。`as any`
+   可以理解為偶爾使用嘅「逃生門」，但當佢喺 37+ 個檔案入面大量出現，就已經係習慣性問題
+3. **佢無法正確對接自動產生嘅 API 類型**。Orval 產生嘅類型同佢寫嘅程式碼有大量唔匹配，
+   反映佢要麼睇唔明自動產生嘅類型定義，要麼寫程式時根本無跟 API 契約
+
+一個具備基本 TypeScript 工程能力嘅開發者，理應可以透過正確嘅類型守衛、
+泛型約束同類型收窄去解決問題，而唔係周圍都用 `as any`。
+
+---
+
+## 二、唔識管理複雜度
+
+**現象：** Demat request 建立精靈係一個多步驟表單
+（`SetupStep` → `RegisteredHolderDetails` → `CertificateSection` →
+`DestinationStep` → `DocumentAndPaymentStep` → `ReviewStep`，一共 6 步）。
+當需求變更，只係要對資料結構作一個小調整，例如加一個可選欄位時，
+每一個 step component 都要逐個打開去改。
+
+**具體嚟講，即係咩意思：**
+
+假設後端喺 Demat request 入面新增咗一個
+`preferredSettlementDate`（首選結算日期）欄位。喺一個設計合理嘅系統入面，
+你理應只需要：
+
+1. 喺 schema / types 入面加返欄位定義
+2. 喺對應嗰一個 step component 入面加一個日期選擇器
+
+但喺 John 嘅實作入面，你要改 **6 個檔案**：
+
+```txt
+config.ts
+SetupStep.tsx
+RegisteredHolderDetails.tsx
+CertificateSection.tsx
+DestinationStep.tsx
+DocumentAndPaymentStep.tsx
+ReviewStep.tsx
+```
+
+**根本原因：**
+資料無經由統一嘅 store 或 context 管理，而係由頂層 component 開始，
+逐層靠 props 手動傳落去。結果就係，任何資料結構變更都會沿住 component tree 向下滲透，
+形成一個 **改一處、全線都要跟住改** 嘅局面。
+
+佢無喺 components 之間建立隔離層，亦無定義穩定嘅介面契約。
+呢個反映出佢缺乏設計 component communication boundary 嘅能力，
+分唔清邊啲實作細節應該封裝喺 component 內部，邊啲資料先應該喺 component 之間共享。
+
+---
+
+## 三、缺乏模組分類同領域建模能力
+
+**核心問題：**
+佢喺寫程式之前，唔會先分析目錄結構同功能結構，睇唔出概念之間嘅層級同聚合關係，
+結果就令大量相關模組全部平鋪喺同一層。
+
+### 典型案例一：User 同 User Registration
+
+兩者喺業務上明顯係父子關係，但程式碼完全反映唔到：
+
+| 層級 | 現狀（平鋪） | 應有結構 |
+| ---- | ------------ | -------- |
+| API | `api/users` 同 `api/user-registrations` 同級 | `api/user/` 下面包含 `registrations/` |
+| Hooks | `use-users.ts` 同 `use-user-registrations.ts` 平鋪 | 歸組到 `hooks/user/` |
+| Lib | `user-reference-data.ts` 同 `user-registrations-reference-data.ts` 平鋪 | 歸組到 `lib/reference-data/user.ts` 等 |
+| Pages | `operations/users` 同 `operations/user-registrations` 同級 | `user/` 下面包含 `registrations/` |
+
+### 典型案例二：USI 同 USI Application
+
+完全一樣嘅模式再次出現：
+
+| 層級 | 現狀 |
+| ---- | ---- |
+| API | `api/usi` 同 `api/usi-application` 同級 |
+| Hooks | `use-usi.ts` 同 `use-usi-application.ts` 平鋪 |
+| Lib | `usi-reference-data.ts` 同 `usi-application-reference-data.ts` 平鋪 |
+| Pages | `operations/usi` 同 `operations/usi-applications` 同級 |
+| Components | `components/intranet/usi` 單獨存在，但 application 相關部分就無對應歸組 |
+
+### 典型案例三：Demat 相關檔案碎片化
+
+`src/lib/` 底下同 Demat 相關嘅 5 個檔案全部平鋪：
+
+```txt
+src/lib/
+  demat-reference-data.ts
+  demat-request-schema.ts
+  demat-request-utils.ts
+  demat-requests-store.ts
+  demat-validation-utils.ts
+```
+
+`src/hooks/` 底下同樣有 5 個 Demat hooks 全部平鋪：
+
+```txt
+src/hooks/
+  use-demat-queue-summary.ts
+  use-demat-reference-data.ts
+  use-demat-requests.ts
+  use-demat-requests-filters.ts
+  use-demat-summary.ts
+```
+
+呢啲檔案明明有好清晰嘅前綴共性（`demat-` / `use-demat-`），
+但 John 無意識到佢哋其實屬於同一個領域分組。
+
+### 呢個反映咩問題
+
+1. **佢唔理解領域模型嘅層級關係**。`user registration` 係 `user`
+   嘅子概念，`USI application` 係 `USI` 嘅子概念，但佢睇唔到呢啲父子同聚合關係，
+   所以無法將呢啲關係翻譯成目錄結構
+2. **佢欠缺模組化工程思維**。當模組數量超過 5–7 個之後，
+   平鋪結構就開始失控。有工程意識嘅開發者會主動識別內聚性，
+   例如檔名前綴、業務相關性，再將相關檔案歸入同一個目錄
+3. **佢喺寫程式之前無做結構分析**。佢無先審視功能模組之間關係、
+   畫模組樹、定好目錄結構嘅習慣，所以最後就變成寫到邊擺到邊
+
+---
+
+## 四、不理解分頁處理
+
+**核心問題：**
+佢唔理解分頁嘅本質應該係按需、按頁載入資料，而唔係一次過攞晒全部資料返前端，
+再喺前端做假分頁。佢喺程式碼入面將 `size` 預設值設成 `100000`，
+實際上就係繞過咗真正嘅 server-side pagination。
+
+### 證據
+
+| 檔案 | 程式碼 | 問題 |
+| ---- | ------ | ---- |
+| [use-demat-requests.ts](src/hooks/use-demat-requests.ts#L32) | `'/api/demat-requests?size=100000'` | URL 入面硬編碼，完全無真正分頁參數 |
+| [use-demat-summary.ts](src/hooks/use-demat-summary.ts#L12) | `'/api/demat-requests?size=100000'` | 只係為咗統計數量，就拉全量資料返前端 |
+| [use-user-registrations.ts](src/hooks/use-user-registrations.ts#L35) | `size = 100000` | 預設值等同全量攞資料，分頁形同虛設 |
+| [use-usi-application.ts](src/hooks/use-usi-application.ts#L30) | `size = 100000` | 同樣問題 |
+| [use-shareholders.ts](src/hooks/use-shareholders.ts#L66) | `size = 100000` | 同樣問題 |
+
+### 呢個反映咩問題
+
+1. **佢唔理解分頁嘅意義**。分頁本身係為咗減低單次資料傳輸量、
+   降低後端壓力，同埋提升首屏回應速度。`size=100000`
+   係完全違背呢啲目標
+2. **佢用假分頁掩蓋真問題**。呢啲 hooks 表面上有 `page` 同 `size`
+   參數，好似支援分頁，但 `size` 預設值直接設做 `100000`，
+   即係只要呼叫方唔主動傳一個細啲嘅值，就會一次過拉晒所有資料返嚟
+3. **最離譜嘅例子係 `use-demat-summary`**。呢個 hook
+   嘅目的只係統計各來源 request 數量，但佢竟然用 `size=100000`
+   將全量 Demat requests 拉返前端再逐條計數。正確做法應該係由後端提供
+   `/api/demat-requests/summary`
+   呢類 endpoint，或者至少喺查詢模式上只回傳聚合數據
+
+呢個說明佢**完全無「計算應該盡量喺服務端完成」嘅意識**。
+
+---
+
+## 五、缺乏表單設計能力，交付物未達企業級 SaaS 標準
+
+**核心問題：**
+佢交付嘅表單頁面，無論喺視覺佈局、互動體驗定組件選型方面，
+都未達到企業級 SaaS 產品嘅基本門檻，幾乎每一個表單頁面最後都要由其他人返工重做。
+
+呢個唔係單純「做得未夠好」嘅問題，而係**由第一版開始就唔具備上線標準**。
+差距唔單止係審美，而係工程層面：無資訊架構、無互動考量、無組件選型判斷。
+
+### 案例分析：User Registration 表單
+
+以 [`register/page.tsx`](src/app/intranet/operations/user-registrations/register/page.tsx)
+為例，呢個表單大概有 20 個欄位，分喺 4 個 Card 入面，但存在以下問題：
+
+#### 1. 欄位無分類，亦無優先級
+
+現時表單有 4 個 Card：`EmailAddressCard`、
+`PersonalIdInformationCard`、`CommunicationInformationCard`，
+再加一個外包出去嘅提交 Card。
+
+但 `PersonalIdInformationCard` 入面其實混雜咗三類完全唔相關嘅資訊：
+
+- **身份資訊**：中英文姓名、證件類型、證件號碼、證件有效期
+- **合規確認**：4 個獨立 checkbox（年齡確認、資料準確、同意條款、私隱政策）
+
+合規確認本質上係法律 / 合規資訊，同個人身份資訊喺語義上根本無關，
+但卻被塞埋喺同一個 Card。呢個說明佢**無先對欄位做語義分類**，
+而係將「剩返落嚟」嘅欄位隨手堆埋一齊。
+
+#### 2. 缺乏視覺層級同優先級
+
+表單入面所有 `<Input>` 元件都一模一樣，完全無區分核心欄位同次要欄位：
+
+```tsx
+// 核心欄位：姓名
+<Input id="first-name" {...field} />
+
+// 次要欄位：地址第 4 行
+<Input id="address-line-4" {...field} />
+```
+
+喺金融表單場景入面，姓名、證件類型、證件號碼係用戶應該最先留意嘅
+**核心資訊**，而地址第 3、4 行只係**補充資訊**。但而家兩者被賦予完全相同嘅視覺權重：
+同樣寬度、同樣高度、同樣相鄰排列。
+
+#### 3. 全寬版面造成大量留白
+
+表單外層結構係 `mx-4 lg:mx-6`，內部使用
+`grid grid-cols-1 md:grid-cols-4`。喺闊螢幕下，4 欄佈局會將所有 `<Input>`
+拉到一樣闊，結果產生大量空白位置，令整體體驗顯得鬆散。
+
+#### 4. 組件選型不當
+
+| 場景 | 實際做法 | 問題 |
+| ---- | -------- | ---- |
+| 證件有效期 | `<Input type="date">` | 原生日期控件喺唔同瀏覽器體驗唔一致；金融系統應該用 DatePicker |
+| 4 個合規確認 | 4 個獨立 `<Checkbox>` 直排 | 無分組容器、無全選 / 批量操作，視覺上過於冗長 |
+| 地址行 1–4 | 4 個同權重 `<Input>` | 地址第 1 行係主地址，應該有更明確區分；超過兩行時應考慮 `<Textarea>` |
+| 電郵地址 | 單獨包成一個 Card | 一個欄位就包一個 Card，過度包裝 |
+
+### 後果：幾乎全部都要返工
+
+以上問題唔係邊緣情況，而係**系統性**出現。佢交付嘅每一個表單頁面幾乎都係同一個模式。即係話：
+
+1. **佢交付嘅頁面達唔到上線標準**，需要其他人介入調整 layout、替換 components、重新分組欄位
+2. **返工成本被轉嫁俾團隊**：Review 發現問題 → 打回頭修改 → 佢唔明點改 → 最後由其他人重做
+3. **喺金融 SaaS 場景尤其致命**：客戶對表單嘅專業感、資訊密度同操作效率要求好高，
+   一個粗糙嘅表單會直接拉低整個產品嘅可信度
+
+### 呢個反映咩問題
+
+1. **佢唔識做欄位分析**。收到表單需求之後，
+   佢無先將欄位按語義分類（核心 vs 補充、必填 vs 可選、個人資訊 vs 合規資訊），
+   而係直接平鋪或者隨意分組
+2. **佢缺乏表單版面意識**。佢似乎唔知道表單寬度應該受控制
+   （一般 600–720px 係比較舒服嘅閱讀寬度），
+   唔知道幾時適合用兩欄 / 三欄佈局，亦唔知道 input 寬度應該跟預期內容長度調整
+3. **佢唔識得揀合適嘅 UI component**。遇到「揀日期」需求，
+   佢用原生 `<input type="date">` 而唔係 DatePicker；遇到長地址內容，
+   佢用 `<Input>` 而唔係 `<Textarea>`。呢個反映佢既缺乏對組件庫能力嘅了解，
+   亦缺乏場景判斷力
+4. **佢對企業級產品質量標準無清晰概念**。佢似乎未有足夠研究過成熟 SaaS
+   產品應有嘅表單形態，因此交付出嚟嘅成果仍然停留喺「做到用得」，
+   而唔係「專業、可靠、可直接上線」
+
+---
+
+## 六、典型案例：`MemorizedDataTable` component 設計分析
+
+`MemorizedDataTable` 係 John 開發嘅一個通用表格 component
+（提交 `3cfdd35`）。以下係呢個 component 暴露出嚟嘅具體設計問題：
+
+### 1. 資料獲取同 UI 層耦合
+
+呢個 component 內部透過 `fetchHook` 自行發起資料請求，
+令佢同時承擔咗「資料容器」同「展示組件」兩個角色。呢個做法違反咗 React
+社群普遍接受嘅 `UI = f(state)` 原則：UI component 應該只負責消費 state 同 rendering，
+而資料獲取同 orchestration 應該留喺 page / container 層。
+
+**具體問題：**
+當頁面需要統一管理 cache strategy、retry behavior 或 request deduplication 時，
+部分資料獲取行為已經埋咗喺 table component 入面，無法由頁面層集中控制。
+
+**正確做法：**
+資料獲取應該上移到 page-level TanStack Query（`useQuery`），
+令 `MemorizedDataTable` 回歸成純展示 component。
+
+### 2. 存在重複請求風險
+
+當頁面同時需要表格資料，以及基於同一資料源衍生出嚟嘅其他資訊時，
+頁面同表格有機會各自獨立觸發請求，造成重複 network call。
+
+**具體問題：**
+摘要卡片同表格列表背後其實係同一個 API，但因為頁面同表格各自管理自己的資料獲取，
+同一個 endpoint 就會被 call 兩次。
+
+呢個說明佢喺設計 component API 時，**無考慮資料共享同 request deduplication 場景**。
+本質上反映出佢無思考過 component 喺整體 data flow 入面處於咩位置。
+
+### 3. 輪詢行為被硬編碼成 component 契約
+
+`fetchHook` API 同 `intervalMs`（預設 5 秒）綁得太緊，
+將 polling semantics 強行植入一個本來應該通用嘅 table component。
+
+**具體問題：**
+低頻 reference-data 頁面只需要初始化時載入一次，
+但而家就被迫配合一套以 polling 為中心嘅 API 模式。
+呢個本質上係**將某個特定業務需求固化成通用 component 行為**，
+反映佢無考慮 reusable design。
+
+### 4. 暴露咗未實作嘅 API
+
+`onRowSelect` 呢類 props 已經喺 component interface 上公開聲明，
+但實際上並無接駁內部邏輯，callback 永遠唔會觸發。
+
+**具體問題：**
+呼叫方預期 `onRowSelect` 可以用嚟驅動 detail panel 更新，最後先發現原來只係一個空殼。
+呢個反映佢喺 API 設計上，**無做到「聲明就要實作」**。好可能係先寫咗介面，
+打算之後再補，但最後變成半完成品。
+
+### 5. 行識別契約隱性依賴 `row.id`
+
+呢個 component 內部默認用 `row.id` 作為 selection 同 row identity
+嘅依據，但實際後端資料未必一定用 `id`，甚至有啲資料集根本無 `id`
+欄位，而係用其他唯一規則。
+
+**具體問題：**
+當某個頁面需要以 `accountNo + market`
+作為複合主鍵標識一條記錄時，呢個 component 就無法適配，容易導致 selection 行為出錯。
+
+佢無意識到 **row identity 其實係業務概念，而唔係 component 應該自行假設嘅規則**。
+正確設計應該暴露一個明確嘅 `getRowId` callback，交由呼叫方定義：
+
+```tsx
+getRowId={(row) => `${row.accountNo}-${row.market}`}
+```
+
+### 呢個案例映射出嚟嘅能力缺口
+
+以上 5 個問題唔係孤立存在，而係直接對應返前面評估中幾個核心缺陷：
+
+| 案例問題 | 映射能力短板 |
+| -------- | ------------ |
+| `fetchHook` 耦合 UI | 複雜度管理、component boundary 設計 |
+| 重複請求 | data flow 建模、複雜度管理 |
+| 輪詢硬編碼 | API 設計、泛用性判斷 |
+| `onRowSelect` 只係空殼 | 半完成品交付、介面契約設計 |
+| 隱式依賴 `row.id` | 介面契約設計、TypeScript 類型建模 |
+
+---
+
+## 七、溝通回應極慢
+
+**核心問題：**
+分配俾 John 嘅 Issue，經常 4–5 日甚至超過一個星期都無回應、無處理，
+嚴重影響團隊協作效率。
+
+**證據來源：**
+[GitLab Issues — Assignee: john.isiderio.hk (Open)](https://172.20.10.20/root/asrs/-/issues/?sort=created_date&state=opened&assignee_username%5B%5D=john.isiderio.hk&first_page_size=20)
+
+喺金融系統開發節奏之下，需求同缺陷通常都有明確排期同 SLA。
+Issue 分配之後長時間無處理，代表：
+
+1. **會阻塞其他人進度** —— 依賴佢完成嘅工作，例如 Code Review、bug fix、API 對接，都會卡住
+2. **問題會不斷累積** —— 未處理嘅 Issue 越積越多，technical debt 只會加快惡化
+3. **反映責任感不足** —— 唔回覆訊息、唔更新 Issue 狀態，代表佢未將團隊協作入面「及時回應」視為基本職業要求
+
+呢點同前文提到嘅程式碼問題其實一脈相承：欠缺規劃嘅編碼習慣，加上唔及時嘅溝通回應，
+令佢同時喺程式碼層面製造問題，亦喺流程層面拖慢問題解決。
+
+---
+
+## 八、引入過多冗餘依賴，缺乏技術選型判斷力
+
+**核心問題：**
+佢喺 trader-station 項目入面引入咗 5 套互不兼容嘅 CSS 方案同 32 個 UI
+相關套件，當中大量功能重疊，但完全無形成統一標準。結果就係安全面擴大、
+升級更困難、新同事入場亦唔知應該跟邊一套。
+
+### CSS 方案：8 個 package，5 套系統，互不兼容
+
+| 體系 | 套件 |
+| ---- | ---- |
+| Emotion | `@emotion/cache` `@emotion/react` `@emotion/styled` |
+| styled-components | `styled-components` |
+| stylis | `stylis` `stylis-plugin-rtl` |
+| Tailwind CSS | `tailwindcss` |
+| Sass | `sass` |
+
+結果就係，同一粒 button，A 頁面用 Emotion，B 頁面用 styled-components，
+C 頁面用 Tailwind，D 頁面用 Sass。**寫法完全唔一致，無法重用，亦無統一主題。**
+
+### UI component library：32 個 package，大量功能重疊
+
+| 用途 | 引入庫 |
+| ---- | ------ |
+| **表格** | ag-grid (3) + react-table + react-virtualized + react-window + react-virtuoso = **7 個 package** |
+| **MUI** | material, icons, lab, styles, system, utils, base, x-date-pickers = **8 個 package** |
+| **日曆** | fullcalendar daygrid, interaction, timegrid, react = **4 個 package** |
+| **富文本** | draft-js, draftjs-to-html, react-draft-wysiwyg = **3 個 package** |
+| **圖表** | apexcharts, react-apexcharts = **2 個 package** |
+| **拖拽** | react-beautiful-dnd（已廢棄）, react-draggable = **2 個 package** |
+| **輪播 / 手勢** | react-swipeable, react-swipeable-views, react-swipeable-views-utils = **3 個 package** |
+| **定位 / 彈出** | react-popper, react-popper-tooltip, material-ui-popup-state = **3 個 package** |
+
+淨係表格已經同時有 ag-grid、react-table、react-virtualized、react-window、
+react-virtuoso 五套 API 生態，**功能高度重疊，但無一套被收斂成全局標準。**
+
+### 呢個反映咩問題
+
+呢個唔係所謂「技術選型多樣化」，而係**根本無做技術選型**。具體嚟講：
+
+1. **未做足調研就直接引入**。見到某篇 blog / tutorial 用咗咩 library，
+   就直接 `npm install`，無比較同類方案，亦無考慮會唔會同項目既有方案衝突
+2. **唔明白「少即是多」**。有經驗嘅工程師引入依賴時通常會比較保守：
+   每加入一個 package，都等於為團隊增加一項長期維護承諾。佢明顯欠缺呢種意識，
+   幾乎當 `package.json` 係收藏夾咁用
+3. **唔識得收斂技術棧**。佢無「團隊應該用一種方式寫 style」、
+   「全個項目應該只用一套表格方案」呢種工程紀律。結果就係每個頁面各自用唔同方案，
+   程式碼無法互相借鑑，亦建立唔到最佳實踐
+
+### 實際後果
+
+1. **安全面 ×58**：npm 依賴數量急增，每個 package 都係獨立攻擊面。
+   一旦有 CVE，要逐個處理，無法簡單收斂
+2. **升級容易被鎖死**：MUI v5 → v6 要改 API，ag-grid v30 → v31 又要改 API。
+   每多一套 library，就多一條 upgrade constraint。5 套 CSS 方案入面，
+   任何一套大版本升級都有可能整壞現有頁面
+3. **新人無從入手**：無任何文件講清楚「呢個項目應該用邊套表格 library」，
+   只能靠翻歷史程式碼估，而唔同頁面得出嘅答案仲可能唔一樣
+4. **重構成本極高**：假設團隊決定將 style 統一去 Tailwind，
+   將表格統一去 react-table，就代表要將 Emotion、styled-components、Sass
+   頁面全部改寫，同時將 ag-grid / react-virtualized / react-window /
+   react-virtuoso 逐套遷移。呢個唔係改幾個檔案咁簡單，而係要同時理解多套互相競爭嘅方案，
+   先有可能安全拆除當中大部分 —— 而當初隨意引入依賴時，明顯無考慮過呢個長期成本
+
+---
+
+## 總結
+
+| 能力維度 | 核心表現 |
+| -------- | -------- |
+| TypeScript | 大量用 `: any` 同 type assertion 繞過檢查 |
+| 複雜度管理 | component 緊耦合，一改就牽連全局 |
+| 模組分類同領域建模 | 相關模組平鋪，缺乏層級分組 |
+| 分頁處理 | 用 `size=100000` 繞過 server-side pagination，全量拉資料 |
+| 表單設計 | 欄位無分類同優先級，組件選型不當，版面留白過多 |
+| 溝通回應 | 分配後 4–5 日甚至一星期都未處理 |
+| 技術選型 | 5 套 CSS + 32 個 UI package，功能重疊而無統一標準 |

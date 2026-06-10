@@ -1,0 +1,516 @@
+---
+title: John Michael Isiderio — Engineering Capability Assessment
+description: Assessment based on the USM project and the trader-station project
+icon: Languages
+---
+
+## I. Insufficient Understanding of the TypeScript Type System
+
+**Observed:** 7 core files use `: any` type annotations (including low-level utility
+files such as `zod-validation-utils.ts`), and 37+ files use `as any` /
+`as unknown as` to bypass type checking.
+
+This points to several layers of problems:
+
+1. **He does not fully understand the function signatures he writes**. Using
+   `: any` in core validation utilities suggests he is unclear about what the
+   input and output types should be.
+2. **When faced with type errors, he chooses to bypass them rather than resolve
+   them properly**. `as any` can be understood as an escape hatch in occasional
+   cases, but when it appears across 37+ files, it becomes a habitual issue.
+3. **He is unable to correctly integrate generated API types**. There are many
+   mismatches between Orval-generated types and his code, which indicates that
+   he either cannot properly read generated type definitions, or that his code
+   does not follow the API contract.
+
+A developer with basic TypeScript engineering ability should be able to solve
+these issues with proper type guards, generic constraints, and type narrowing,
+rather than relying on `as any` everywhere.
+
+---
+
+## II. Inability to Manage Complexity
+
+**Observed:** The Demat request creation wizard is a multi-step form
+(`SetupStep` → `RegisteredHolderDetails` → `CertificateSection` →
+`DestinationStep` → `DocumentAndPaymentStep` → `ReviewStep`, 6 steps in total).
+When requirements change and the data structure needs a small adjustment, such
+as adding one optional field, every step component must be opened and updated
+one by one.
+
+**What this means in practice:**
+
+Suppose the backend adds an optional field called
+`preferredSettlementDate` to the Demat request. In a reasonably designed
+system, this should require only:
+
+1. Adding the field definition in the schema or types
+2. Adding a date picker in the one relevant step component
+
+But in John's implementation, you would need to modify **6 files**:
+
+```txt
+config.ts
+SetupStep.tsx
+RegisteredHolderDetails.tsx
+CertificateSection.tsx
+DestinationStep.tsx
+DocumentAndPaymentStep.tsx
+ReviewStep.tsx
+```
+
+**Root cause:**
+Data is not managed through a unified store or context. Instead, it is passed
+manually through props from the top-level component down the tree. As a result,
+any change to the data structure leaks through the entire component tree and
+creates a **change-one-thing, update-everything** situation.
+
+He did not establish isolation boundaries between components, nor define stable
+interface contracts. This suggests a lack of ability to design communication
+boundaries between components, specifically an inability to distinguish between
+details that should be encapsulated internally and data that should be shared.
+
+---
+
+## III. Lack of Module Classification and Domain Modeling Ability
+
+**Core issue:**
+Before coding, he does not analyze the directory structure or functional
+structure. He cannot identify hierarchy and aggregation relationships between
+concepts, which leads to a large number of related modules being flattened at
+the same level.
+
+### Typical Case 1: User and User Registration
+
+These two clearly have a parent-child business relationship, but the codebase
+does not reflect that at all:
+
+| Layer | Current Flat Structure | Expected Structure |
+| ----- | ---------------------- | ------------------ |
+| API | `api/users` and `api/user-registrations` at the same level | `registrations/` under `api/user/` |
+| Hooks | `use-users.ts` and `use-user-registrations.ts` flattened | grouped under `hooks/user/` |
+| Lib | `user-reference-data.ts` and `user-registrations-reference-data.ts` flattened | grouped as `lib/reference-data/user.ts`, etc. |
+| Pages | `operations/users` and `operations/user-registrations` at the same level | `registrations/` under `user/` |
+
+### Typical Case 2: USI and USI Application
+
+Exactly the same pattern appears again:
+
+| Layer | Current State |
+| ----- | ------------- |
+| API | `api/usi` and `api/usi-application` at the same level |
+| Hooks | `use-usi.ts` and `use-usi-application.ts` flattened |
+| Lib | `usi-reference-data.ts` and `usi-application-reference-data.ts` flattened |
+| Pages | `operations/usi` and `operations/usi-applications` at the same level |
+| Components | `components/intranet/usi` exists on its own, while application-related components are not grouped accordingly |
+
+### Typical Case 3: Fragmented Demat-Related Files
+
+All 5 Demat-related files under `src/lib/` are flattened:
+
+```txt
+src/lib/
+  demat-reference-data.ts
+  demat-request-schema.ts
+  demat-request-utils.ts
+  demat-requests-store.ts
+  demat-validation-utils.ts
+```
+
+Likewise, 5 Demat hooks under `src/hooks/` are also flattened:
+
+```txt
+src/hooks/
+  use-demat-queue-summary.ts
+  use-demat-reference-data.ts
+  use-demat-requests.ts
+  use-demat-requests-filters.ts
+  use-demat-summary.ts
+```
+
+These files have obvious shared prefixes (`demat-` / `use-demat-`), but John
+did not recognize that they belong to the same domain grouping.
+
+### What this indicates
+
+1. **He does not understand the hierarchical relationships in a domain model**.
+   "User registration" is a sub-concept of "user", and "USI application" is a
+   sub-concept of "USI", but he does not recognize these parent-child or
+   aggregation relationships and therefore cannot translate them into directory
+   structure.
+2. **He lacks modular engineering thinking**. Once the number of modules exceeds
+   roughly 5–7 files, a flat structure starts to become unmanageable. An
+   engineer with stronger structural awareness would proactively identify
+   cohesion, such as shared prefixes or business relevance, and group related
+   files into directories.
+3. **He does not perform structural analysis before coding**. There is no sign
+   that he reviews module relationships, sketches a module tree, or decides on a
+   directory structure before implementation. As a result, files end up wherever
+   they happen to be added.
+
+---
+
+## IV. Misunderstanding of Pagination
+
+**Core issue:**
+He does not understand the essence of pagination: data should be loaded on
+demand and page by page, rather than fetched in full once and then paginated
+artificially on the frontend. In his code, the default `size` is set to
+`100000`, effectively bypassing real server-side pagination.
+
+### Evidence
+
+| File | Code | Problem |
+| ---- | ---- | ------- |
+| [use-demat-requests.ts](src/hooks/use-demat-requests.ts#L32) | `'/api/demat-requests?size=100000'` | hardcoded in the URL, with no real pagination parameters |
+| [use-demat-summary.ts](src/hooks/use-demat-summary.ts#L12) | `'/api/demat-requests?size=100000'` | fetches the full dataset just to count items on the frontend |
+| [use-user-registrations.ts](src/hooks/use-user-registrations.ts#L35) | `size = 100000` | default value is effectively "fetch all", making pagination meaningless |
+| [use-usi-application.ts](src/hooks/use-usi-application.ts#L30) | `size = 100000` | same issue |
+| [use-shareholders.ts](src/hooks/use-shareholders.ts#L66) | `size = 100000` | same issue |
+
+### What this indicates
+
+1. **He does not understand the purpose of pagination**. Pagination exists to
+   reduce payload size, lower backend load, and improve initial response time.
+   `size=100000` works directly against those goals.
+2. **He uses fake pagination to conceal the real problem**. These hooks expose
+   `page` and `size` parameters as though they support pagination, but the
+   default `size = 100000` means that unless callers explicitly override it, the
+   code still fetches everything at once.
+3. **The most extreme example is `use-demat-summary`**. That hook only needs to
+   count requests by source, yet it fetches the full Demat request list to the
+   frontend and counts items there one by one. The correct approach would be to
+   provide a backend endpoint such as `/api/demat-requests/summary`, or at least
+   a query mode that returns only aggregate data.
+
+This shows that he has **no real awareness that computation should happen on the
+server** when the server owns the data and can produce the result more
+efficiently.
+
+---
+
+## V. Lack of Form Design Ability; Deliverables Fall Short of Enterprise SaaS Standards
+
+**Core issue:**
+The form pages he delivers do not meet the basic standard of an enterprise SaaS
+product in terms of visual layout, interaction quality, or component selection.
+Almost every form page needs to be reworked by someone else after delivery.
+
+This is not merely a case of the forms being "not good enough." The issue is
+that **they are not production-ready from the first version**. The gap is not
+primarily about aesthetics, but about engineering quality: there is no
+information architecture, no interaction consideration, and no sound judgment in
+component selection.
+
+### Case Analysis: User Registration Form
+
+Using [`register/page.tsx`](src/app/intranet/operations/user-registrations/register/page.tsx)
+as an example, the form contains around 20 fields split across 4 cards, but it
+shows the following problems:
+
+#### 1. No categorization or prioritization of fields
+
+The form currently has 4 cards: `EmailAddressCard`,
+`PersonalIdInformationCard`, `CommunicationInformationCard`, plus an outsourced
+submission card.
+
+But `PersonalIdInformationCard` mixes three completely unrelated categories of
+information:
+
+- **Identity information**: names in Chinese and English, ID type, ID number,
+  ID expiry date
+- **Compliance confirmations**: 4 separate checkboxes (age confirmation,
+  information accuracy, agreement to terms, privacy policy)
+
+Compliance confirmation is fundamentally legal/compliance-related information
+and has no semantic reason to sit inside the same card as personal identity
+details. This suggests that he **did not classify fields semantically** and
+instead simply put the "remaining" fields into one card.
+
+#### 2. Lack of visual hierarchy and prioritization
+
+All `<Input>` components in the form are treated identically, with no
+differentiation between primary and secondary fields:
+
+```tsx
+// Core field: name
+<Input id="first-name" {...field} />
+
+// Secondary field: address line 4
+<Input id="address-line-4" {...field} />
+```
+
+In a financial form, names, ID type, and ID number are **core information**
+that users should focus on first, whereas address lines 3 and 4 are
+**supplementary** information. However, they are given exactly the same visual
+weight: same width, same height, same adjacency.
+
+#### 3. Full-width layout creates excessive whitespace
+
+The outer container uses `mx-4 lg:mx-6`, and the internal layout uses
+`grid grid-cols-1 md:grid-cols-4`. On wide screens, that 4-column layout
+stretches all `<Input>` components to equal width and creates a large amount of
+empty space, making the experience feel visually loose.
+
+#### 4. Poor component selection
+
+| Scenario | Actual Implementation | Problem |
+| -------- | --------------------- | ------- |
+| ID expiry date | `<Input type="date">` | Native date controls are inconsistent across browsers; a financial system should use a proper DatePicker |
+| 4 compliance confirmations | 4 standalone `<Checkbox>` elements stacked vertically | No grouping container, no select-all / batch handling, and visually verbose |
+| Address lines 1–4 | 4 equally weighted `<Input>` fields | Address line 1 is the primary address and should be visually distinguished; when the address exceeds 2 lines, `<Textarea>` should be considered |
+| Email address | A dedicated card for a single field | Over-wrapped for one field |
+
+### Consequence: almost every form requires rework
+
+The issues above are not isolated edge cases; they are **systematic**. The same
+patterns appear across nearly every form page he delivers. This means:
+
+1. **The pages he delivers do not meet production standards** and require others
+   to step in to revise layout, adjust components, and regroup fields
+2. **The cost of rework is pushed onto the team**: problems are found in review
+   → returned for changes → he does not understand how to correct them →
+   someone else rebuilds the page
+3. **This is especially damaging in a financial SaaS context**: clients expect
+   professionalism, information density, and operational efficiency in forms. A
+   rough form directly undermines the credibility of the product
+
+### What this indicates
+
+1. **He does not perform field analysis**. When given form requirements, he does
+   not first classify fields by meaning (core vs supplementary, required vs
+   optional, personal information vs compliance information), but instead lays
+   them out flat or groups them arbitrarily.
+2. **He lacks form layout awareness**. He does not appear to understand that
+   form width should be constrained for readability (typically 600–720px), that
+   two-column and three-column layouts suit different use cases, or that input
+   width should reflect expected content length.
+3. **He does not know how to choose UI components appropriately**. For a "pick a
+   date" requirement, he uses native `<input type="date">` instead of a
+   DatePicker; for long address input, he uses `<Input>` instead of
+   `<Textarea>`. This suggests both limited knowledge of available components and
+   weak judgment about which component fits which scenario.
+4. **He lacks a quality benchmark for enterprise products**. He likely has not
+   studied enough mature SaaS products to understand what a professional form
+   should look and feel like, so his output remains stuck at a "works at a basic
+   level" standard rather than a "professional and ready for production"
+   standard.
+
+---
+
+## VI. Typical Case: Analysis of the `MemorizedDataTable` Component Design
+
+`MemorizedDataTable` is a general-purpose table component developed by John
+(commit `3cfdd35`). The component exposes the following specific design
+problems:
+
+### 1. Data fetching is coupled with the UI layer
+
+The component internally executes data requests via `fetchHook`, meaning it
+simultaneously takes on the role of both a "data container" and a "presentation
+component." This violates the widely accepted React principle of
+`UI = f(state)`: UI components should consume state and focus on rendering,
+while data fetching and orchestration should remain at the page/container layer.
+
+**Specific problem:**
+When a page needs centralized control over caching strategy, retry behavior, or
+request deduplication, part of the data fetching behavior is already buried
+inside the table component and cannot be centrally controlled from the page.
+
+**Correct approach:** Data fetching should be lifted to page-level TanStack
+Query (`useQuery`), and `MemorizedDataTable` should be reduced to a pure
+presentation component.
+
+### 2. Risk of duplicate requests
+
+When a page needs both table data and other information derived from the same
+data source, the page and the table may each trigger their own request, causing
+duplicate network calls.
+
+**Specific problem:**
+The summary card and the table list are backed by the same API, but because the
+page and the table each manage their own data fetching, the same endpoint gets
+called twice.
+
+This shows that, when designing the component API, he **did not consider
+data-sharing and request deduplication scenarios**. At its core, this reflects
+an inability to think through where a component sits within the overall data
+flow.
+
+### 3. Polling behavior is hardcoded into the component contract
+
+The `fetchHook` API is tightly bound to `intervalMs` (default 5 seconds),
+forcing polling semantics into a supposedly generic table component.
+
+**Specific problem:**
+Low-frequency reference-data pages only need to load once during initialization,
+but are forced to adapt to a polling-oriented API model. This is a classic case
+of **hardcoding a specific business requirement into a general-purpose
+component**, which shows a lack of concern for reusability.
+
+### 4. Public API is exposed but not implemented
+
+Props such as `onRowSelect` are publicly declared in the component interface,
+but are not actually wired into the internal implementation, so the callback is
+never triggered.
+
+**Specific problem:** A caller expects `onRowSelect` to drive something like a
+detail panel update, but eventually discovers that it is an empty shell. This
+shows that, when designing APIs, he **does not treat "declared" as "must be
+implemented."** It suggests that the interface may have been defined first with
+the intention to implement it later, but ended up as unfinished code.
+
+### 5. Implicit dependency on `row.id` as the row identity contract
+
+Internally, the component implicitly depends on `row.id` for selection behavior
+and row identity, but real backend datasets may use different uniqueness rules,
+and some datasets may not have an `id` field at all.
+
+**Specific problem:** When a page needs to identify rows by a composite key such
+as `accountNo + market`, the component cannot adapt, which may cause incorrect
+selection behavior.
+
+He did not recognize that **row identity is a business concept, not a component
+assumption**. The component should expose an explicit `getRowId` callback so the
+caller can define the rule:
+
+```tsx
+getRowId={(row) => `${row.accountNo}-${row.market}`}
+```
+
+### Capability gaps reflected by this case
+
+These five issues are not isolated. They map directly back to the key
+deficiencies identified earlier:
+
+| Case Issue | Underlying Capability Gap |
+| ---------- | ------------------------- |
+| `fetchHook` coupled with UI | complexity management, component boundary design |
+| duplicate requests | data flow modeling, complexity management |
+| polling hardcoded | API design, reusability judgment |
+| `onRowSelect` is an empty shell | unfinished delivery, interface contract design |
+| implicit dependency on `row.id` | interface contract design, TypeScript type modeling |
+
+---
+
+## VII. Extremely Slow Communication Response
+
+**Core issue:** Issues assigned to John often go unaddressed for 4–5 days, or
+even over a week, with no response or progress. This severely affects team
+collaboration efficiency.
+
+**Evidence source:**
+[GitLab Issues — Assignee: john.isiderio.hk (Open)](https://172.20.10.20/root/asrs/-/issues/?sort=created_date&state=opened&assignee_username%5B%5D=john.isiderio.hk&first_page_size=20)
+
+In the delivery rhythm of a financial system, requirements and defects normally
+come with clear schedules and SLAs. When an issue is assigned but remains
+untouched for a long period, it means:
+
+1. **Other people's work gets blocked** — tasks that depend on him, such as code
+   review, bug fixing, or API integration, cannot move forward
+2. **Problems accumulate** — unresolved issues pile up and technical debt grows
+   faster
+3. **It reflects weak ownership** — failure to reply to messages or update issue
+   status suggests that he does not treat timely response in team collaboration
+   as a basic professional expectation
+
+This aligns with the problems described earlier: poor planning in coding habits,
+combined with untimely communication, causes problems both in code quality and
+in delivery process.
+
+---
+
+## VIII. Introduction of Excessive Redundant Dependencies; Weak Technical Selection Judgment
+
+**Core issue:**
+In the trader-station project, he introduced 5 mutually incompatible CSS
+approaches and 32 UI-related packages, many of which overlap in functionality
+without any unified standard. This expands the security surface, makes upgrades
+harder, and leaves new team members with no clear direction.
+
+### CSS approaches: 8 packages across 5 incompatible systems
+
+| System | Packages |
+| ------ | -------- |
+| Emotion | `@emotion/cache` `@emotion/react` `@emotion/styled` |
+| styled-components | `styled-components` |
+| stylis | `stylis` `stylis-plugin-rtl` |
+| Tailwind CSS | `tailwindcss` |
+| Sass | `sass` |
+
+The result is that the same button may be implemented with Emotion on page A,
+styled-components on page B, Tailwind on page C, and Sass on page D. **There is
+no consistency, no reuse, and no unified theming standard.**
+
+### UI component libraries: 32 packages with heavy overlap
+
+| Use Case | Libraries Introduced |
+| -------- | -------------------- |
+| **Tables** | ag-grid (3) + react-table + react-virtualized + react-window + react-virtuoso = **7 packages** |
+| **MUI** | material, icons, lab, styles, system, utils, base, x-date-pickers = **8 packages** |
+| **Calendar** | fullcalendar daygrid, interaction, timegrid, react = **4 packages** |
+| **Rich text** | draft-js, draftjs-to-html, react-draft-wysiwyg = **3 packages** |
+| **Charts** | apexcharts, react-apexcharts = **2 packages** |
+| **Drag and drop** | react-beautiful-dnd (deprecated), react-draggable = **2 packages** |
+| **Carousel/gestures** | react-swipeable, react-swipeable-views, react-swipeable-views-utils = **3 packages** |
+| **Positioning/popups** | react-popper, react-popper-tooltip, material-ui-popup-state = **3 packages** |
+
+For tables alone, there are five different API ecosystems:
+ag-grid, react-table, react-virtualized, react-window, and react-virtuoso.
+**Their functionality overlaps heavily, yet there is no single project-wide
+standard.**
+
+### What this indicates
+
+This is not "diverse technology choices." It is **an absence of technology
+selection discipline**. Specifically:
+
+1. **Dependencies are introduced without proper evaluation**. He sees a library
+   used in a blog post or tutorial and installs it directly, without comparing
+   alternatives or considering whether it conflicts with tools already in the
+   project.
+2. **He does not understand that less is often more**. Experienced engineers are
+   conservative about adding dependencies: every package introduced is a
+   long-term maintenance commitment. He appears to lack this awareness and
+   treats `package.json` like a collection shelf.
+3. **He does not understand the need to converge on a stack**. He lacks the
+   engineering discipline to say "the team should use one way to write styles"
+   or "the whole project should use one table library." As a result, different
+   pages use different approaches, code cannot be learned from consistently, and
+   no shared best practices emerge.
+
+### Practical consequences
+
+1. **Security surface ×58**: the number of npm packages increases dramatically,
+   and each package adds its own attack surface. If a CVE appears, they must be
+   handled one by one.
+2. **Upgrades become blocked**: MUI v5 → v6 requires API changes; ag-grid v30 →
+   v31 requires API changes. Each extra library adds another independent upgrade
+   constraint. A major version upgrade in any of the 5 CSS approaches can break
+   existing pages.
+3. **New team members have no clear starting point**: there is no documentation
+   that tells them which table library the project actually uses, so they can
+   only infer it from historical code — and different pages lead to different
+   answers.
+4. **Refactoring becomes extremely difficult**: if the team decides to unify
+   styles around Tailwind and unify tables around react-table, that means
+   rewriting Emotion pages, styled-components pages, and Sass pages into
+   Tailwind, while also migrating ag-grid / react-virtualized / react-window /
+   react-virtuoso implementations into react-table. This is not a matter of
+   changing a few files. It requires understanding multiple competing stacks at
+   once just to safely remove most of them — a cost that was clearly not
+   considered when those dependencies were introduced casually.
+
+---
+
+## Summary
+
+| Capability Area | Core Manifestation |
+| --------------- | ------------------ |
+| TypeScript | heavy use of `: any` and type assertions to bypass checks |
+| Complexity management | tight component coupling, causing broad cascading changes |
+| Module classification and domain modeling | related modules flattened, lacking hierarchical grouping |
+| Pagination handling | `size=100000` used to bypass server-side pagination and fetch everything |
+| Form design | no field categorization or prioritization, poor component selection, excessive empty layout |
+| Communication responsiveness | assigned issues remain untouched for 4–5 days or even a week |
+| Technical selection | 5 CSS systems + 32 UI packages, with overlapping functionality and no unified standard |
