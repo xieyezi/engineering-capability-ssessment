@@ -1,4 +1,4 @@
-export const appName = 'Docs';
+export const appName = 'Engineering Capability Assessment';
 export const docsRoute = '/docs';
 export const docsImageRoute = '/og/docs';
 
