@@ -143,11 +143,11 @@ src/hooks/
 
 | 檔案 | 程式碼 | 問題 |
 | ---- | ------ | ---- |
-| [use-demat-requests.ts](src/hooks/use-demat-requests.ts#L32) | `'/api/demat-requests?size=100000'` | URL 入面硬編碼，完全無真正分頁參數 |
-| [use-demat-summary.ts](src/hooks/use-demat-summary.ts#L12) | `'/api/demat-requests?size=100000'` | 只係為咗統計數量，就拉全量資料返前端 |
-| [use-user-registrations.ts](src/hooks/use-user-registrations.ts#L35) | `size = 100000` | 預設值等同全量攞資料，分頁形同虛設 |
-| [use-usi-application.ts](src/hooks/use-usi-application.ts#L30) | `size = 100000` | 同樣問題 |
-| [use-shareholders.ts](src/hooks/use-shareholders.ts#L66) | `size = 100000` | 同樣問題 |
+| `src/hooks/use-demat-requests.ts#L32` | `'/api/demat-requests?size=100000'` | URL 入面硬編碼，完全無真正分頁參數 |
+| `src/hooks/use-demat-summary.ts#L12` | `'/api/demat-requests?size=100000'` | 只係為咗統計數量，就拉全量資料返前端 |
+| `src/hooks/use-user-registrations.ts#L35` | `size = 100000` | 預設值等同全量攞資料，分頁形同虛設 |
+| `src/hooks/use-usi-application.ts#L30` | `size = 100000` | 同樣問題 |
+| `src/hooks/use-shareholders.ts#L66` | `size = 100000` | 同樣問題 |
 
 ### 呢個反映咩問題
 
@@ -178,7 +178,7 @@ src/hooks/
 
 ### 案例分析：User Registration 表單
 
-以 [`register/page.tsx`](src/app/intranet/operations/user-registrations/register/page.tsx)
+以 `src/app/intranet/operations/user-registrations/register/page.tsx`
 為例，呢個表單大概有 20 個欄位，分喺 4 個 Card 入面，但存在以下問題：
 
 #### 1. 欄位無分類，亦無優先級

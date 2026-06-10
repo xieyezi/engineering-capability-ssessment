@@ -162,11 +162,11 @@ artificially on the frontend. In his code, the default `size` is set to
 
 | File | Code | Problem |
 | ---- | ---- | ------- |
-| [use-demat-requests.ts](src/hooks/use-demat-requests.ts#L32) | `'/api/demat-requests?size=100000'` | hardcoded in the URL, with no real pagination parameters |
-| [use-demat-summary.ts](src/hooks/use-demat-summary.ts#L12) | `'/api/demat-requests?size=100000'` | fetches the full dataset just to count items on the frontend |
-| [use-user-registrations.ts](src/hooks/use-user-registrations.ts#L35) | `size = 100000` | default value is effectively "fetch all", making pagination meaningless |
-| [use-usi-application.ts](src/hooks/use-usi-application.ts#L30) | `size = 100000` | same issue |
-| [use-shareholders.ts](src/hooks/use-shareholders.ts#L66) | `size = 100000` | same issue |
+| `src/hooks/use-demat-requests.ts#L32` | `'/api/demat-requests?size=100000'` | hardcoded in the URL, with no real pagination parameters |
+| `src/hooks/use-demat-summary.ts#L12` | `'/api/demat-requests?size=100000'` | fetches the full dataset just to count items on the frontend |
+| `src/hooks/use-user-registrations.ts#L35` | `size = 100000` | default value is effectively "fetch all", making pagination meaningless |
+| `src/hooks/use-usi-application.ts#L30` | `size = 100000` | same issue |
+| `src/hooks/use-shareholders.ts#L66` | `size = 100000` | same issue |
 
 ### What this indicates
 
@@ -204,7 +204,7 @@ component selection.
 
 ### Case Analysis: User Registration Form
 
-Using [`register/page.tsx`](src/app/intranet/operations/user-registrations/register/page.tsx)
+Using `src/app/intranet/operations/user-registrations/register/page.tsx`
 as an example, the form contains around 20 fields split across 4 cards, but it
 shows the following problems:
 
